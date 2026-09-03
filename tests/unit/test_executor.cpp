@@ -6,6 +6,7 @@
 #include <any>
 #include <atomic>
 #include <chrono>
+#include <format>
 #include <memory>
 #include <stdexcept>
 #include <thread>
@@ -133,7 +134,7 @@ TEST(executor, should_rethrow_task_exception_from_future) {
   Executor executor(kTwoWorkers);
   auto graph = MakeSealedGraph();
   graph->AddNode([](std::vector<std::any>&) -> std::any {
-    throw std::runtime_error{"boom"};
+    throw std::runtime_error{std::format("boom")};
   });
   graph->Seal();
 
@@ -152,7 +153,7 @@ TEST(executor, should_skip_dependents_after_failure) {
   std::atomic<bool> dependent_ran{false};
 
   const auto a = graph->AddNode([](std::vector<std::any>&) -> std::any {
-    throw std::runtime_error{"boom"};
+    throw std::runtime_error{std::format("boom")};
   });
   const auto b = graph->AddNode([&](std::vector<std::any>&) -> std::any {
     dependent_ran.store(true);
@@ -234,7 +235,7 @@ TEST(executor, should_run_same_graph_concurrently_with_itself) {
 }
 
 TEST(executor, should_finish_inflight_run_before_destruction) {
-  std::future<void> future;
+  std::future<std::vector<std::any>> future;
   std::atomic<bool> done{false};
   {
     Executor executor(kTwoWorkers);

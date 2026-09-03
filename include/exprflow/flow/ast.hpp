@@ -68,8 +68,7 @@ EveryExpr(Prev, Fs...) -> EveryExpr<Prev, Fs...>;
 
 template <typename Prev, typename... Fs>
 struct NodeOutputs<EveryExpr<Prev, Fs...>> {
-  using type =
-      std::tuple<InvokeResultFromTupleT<Fs, OutputsT<Prev>>...>;
+  using type = std::tuple<InvokeResultFromTupleT<Fs, OutputsT<Prev>>...>;
 };
 
 template <typename Prev, typename Cond, typename ThenF, typename ElseF>

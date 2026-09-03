@@ -4,9 +4,10 @@
 
 #include <any>
 #include <cstdint>
-#include <functional>
+#include <format>
+#include <memory>
 #include <span>
-#include <type_traits>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -46,6 +47,7 @@ class TaskGraph {
   std::vector<uint32_t> flat_offsets_;
 
   std::vector<NodeTask> tasks_;
+  std::vector<std::shared_ptr<void>> owned_;
 
   std::vector<std::vector<NodeId>> out_adj_;
   std::vector<std::uint32_t> indegree_;
@@ -61,6 +63,18 @@ class TaskGraph {
   TaskGraph(TaskGraph&&) = delete;
   TaskGraph& operator=(TaskGraph&&) = delete;
   auto AddNode(NodeTask task) -> NodeId;
+
+  template <typename T>
+  T* Save(T value) {
+    if (Sealed()) [[unlikely]] {
+      throw std::logic_error(std::format(
+          "TaskGraph::Save: cannot save, graph is already sealed"));
+    }
+    auto owned = std::make_shared<T>(std::move(value));
+    T* raw = owned.get();
+    owned_.push_back(std::move(owned));
+    return raw;
+  }
 
   void AddEdge(NodeId from, NodeId to);
   void Seal();

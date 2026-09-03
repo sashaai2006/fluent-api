@@ -1,82 +1,151 @@
 #pragma once
 
-#include <condition_variable>
-#include <mutex>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
-#include <queue>
+#include <thread>
+#include <utility>
 
 namespace exprflow::sync {
 
+// Lock-free блокирующая очередь MPMC
 template <typename Task>
 class BlockQueue {
  private:
-  std::queue<Task> queue_;
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  bool open_{true};
+  struct Node {
+    Node() = default;
+    template <typename U>
+    explicit Node(U&& value) : value(std::in_place, std::forward<U>(value)) {}
+
+    std::optional<Task> value;
+    std::atomic<Node*> next{nullptr};
+    Node* retired_next{nullptr};
+  };
+
+  static constexpr std::int64_t kClosedBit = std::int64_t{1} << 62;
+  static constexpr std::int64_t kCountMask = ~kClosedBit;
+
+  alignas(64) std::atomic<Node*> head_;
+  alignas(64) std::atomic<Node*> tail_;
+  alignas(64) std::atomic<std::int64_t> count_{0};
+  std::atomic<Node*> garbage_{nullptr};
 
  public:
-  BlockQueue() = default;
+  BlockQueue() {
+    Node* dummy = new Node();
+    head_.store(dummy, std::memory_order_relaxed);
+    tail_.store(dummy, std::memory_order_relaxed);
+  }
   BlockQueue(const BlockQueue&) = delete;
   BlockQueue& operator=(const BlockQueue&) = delete;
   BlockQueue(BlockQueue&&) = delete;
   BlockQueue& operator=(BlockQueue&&) = delete;
   ~BlockQueue();
+
   template <typename U>
   void Push(U&& t);
   std::optional<Task> Get();
   bool Empty();
   size_t Size();
   void Close();
+
+ private:
+  Task PopClaimed();
+  void Retire(Node* node);
 };
 
 template <typename Task>
 BlockQueue<Task>::~BlockQueue() {
   Close();
+  Node* node = garbage_.load(std::memory_order_relaxed);
+  while (node != nullptr) {
+    Node* next = node->retired_next;
+    delete node;
+    node = next;
+  }
+  node = head_.load(std::memory_order_relaxed);
+  while (node != nullptr) {
+    Node* next = node->next.load(std::memory_order_relaxed);
+    delete node;
+    node = next;
+  }
 }
 
 template <typename Task>
 template <typename U>
 void BlockQueue<Task>::Push(U&& t) {
-  {
-    std::lock_guard guard(mutex_);
-    if (!open_) {
-      return;
-    }
-    queue_.push(std::forward<U>(t));
+  if ((count_.load(std::memory_order_acquire) & kClosedBit) != 0) {
+    return;
   }
-  cv_.notify_one();
+  Node* node = new Node(std::forward<U>(t));
+  Node* prev_tail = tail_.exchange(node, std::memory_order_acq_rel);
+  prev_tail->next.store(node, std::memory_order_release);
+  count_.fetch_add(1, std::memory_order_acq_rel);
+  count_.notify_one();
 }
 
 template <typename Task>
 std::optional<Task> BlockQueue<Task>::Get() {
-  std::unique_lock lock(mutex_);
-  cv_.wait(lock, [&]() -> bool { return !(open_ && queue_.empty()); });
-  if (queue_.empty()) {
-    return std::nullopt;
+  for (;;) {
+    std::int64_t observed = count_.load(std::memory_order_acquire);
+    const std::int64_t available = observed & kCountMask;
+    if (available > 0) {
+      if (count_.compare_exchange_weak(observed, observed - 1,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire)) {
+        return PopClaimed();
+      }
+      continue;
+    }
+    if ((observed & kClosedBit) != 0) {
+      return std::nullopt;
+    }
+    count_.wait(observed, std::memory_order_acquire);
   }
-  auto t = std::move(queue_.front());
-  queue_.pop();
-  return t;
 }
 
-template <typename T>
-bool BlockQueue<T>::Empty() {
-  std::lock_guard lock(mutex_);
-  return queue_.empty();
+template <typename Task>
+Task BlockQueue<Task>::PopClaimed() {
+  for (;;) {
+    Node* head = head_.load(std::memory_order_acquire);
+    Node* next = head->next.load(std::memory_order_acquire);
+    if (next == nullptr) {
+      std::this_thread::yield();
+      continue;
+    }
+    if (head_.compare_exchange_weak(head, next, std::memory_order_acq_rel,
+                                    std::memory_order_acquire)) {
+      Task value = std::move(*next->value);
+      Retire(head);
+      return value;
+    }
+  }
 }
 
-template <typename T>
-size_t BlockQueue<T>::Size() {
-  std::lock_guard lock(mutex_);
-  return queue_.size();
+template <typename Task>
+void BlockQueue<Task>::Retire(Node* node) {
+  node->retired_next = garbage_.load(std::memory_order_relaxed);
+  while (!garbage_.compare_exchange_weak(node->retired_next, node,
+                                         std::memory_order_release,
+                                         std::memory_order_relaxed)) {
+  }
+}
+
+template <typename Task>
+bool BlockQueue<Task>::Empty() {
+  return Size() == 0;
+}
+
+template <typename Task>
+size_t BlockQueue<Task>::Size() {
+  return static_cast<size_t>(count_.load(std::memory_order_acquire) & kCountMask);
 }
 
 template <typename Task>
 void BlockQueue<Task>::Close() {
-  std::lock_guard guard(mutex_);
-  open_ = false;
-  cv_.notify_all();
+  count_.fetch_or(kClosedBit, std::memory_order_acq_rel);
+  count_.notify_all();
 }
 
 }  // namespace exprflow::sync

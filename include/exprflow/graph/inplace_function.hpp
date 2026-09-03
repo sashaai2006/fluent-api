@@ -54,15 +54,16 @@ InplaceFunction<R(Args...), Capacity>::~InplaceFunction() {
 }
 
 template <typename R, typename... Args, std::size_t Capacity>
-InplaceFunction<R(Args...), Capacity>::InplaceFunction(InplaceFunction&& other) noexcept {
+InplaceFunction<R(Args...), Capacity>::InplaceFunction(
+    InplaceFunction&& other) noexcept {
   MoveFrom(other);
 }
 
 template <typename R, typename... Args, std::size_t Capacity>
 template <typename Fn>
 InplaceFunction<R(Args...), Capacity>::InplaceFunction(Fn&& fn)
-  requires(
-      !std::same_as<std::remove_cvref_t<Fn>, InplaceFunction<R(Args...), Capacity>>)
+  requires(!std::same_as<std::remove_cvref_t<Fn>,
+                         InplaceFunction<R(Args...), Capacity>>)
 {
   using clean_fn = std::remove_cvref_t<Fn>;
   static_assert(std::is_move_constructible_v<clean_fn>,
@@ -107,7 +108,8 @@ R InplaceFunction<R(Args...), Capacity>::operator()(Args... args) const {
 }
 
 template <typename R, typename... Args, std::size_t Capacity>
-InplaceFunction<R(Args...), Capacity>& InplaceFunction<R(Args...), Capacity>::operator=(
+InplaceFunction<R(Args...), Capacity>&
+InplaceFunction<R(Args...), Capacity>::operator=(
     InplaceFunction&& other) noexcept {
   if (this != &other) {
     Reset();
@@ -117,7 +119,8 @@ InplaceFunction<R(Args...), Capacity>& InplaceFunction<R(Args...), Capacity>::op
 }
 
 template <typename R, typename... Args, std::size_t Capacity>
-void InplaceFunction<R(Args...), Capacity>::MoveFrom(InplaceFunction& other) noexcept {
+void InplaceFunction<R(Args...), Capacity>::MoveFrom(
+    InplaceFunction& other) noexcept {
   if (other.vt_) {
     other.vt_->Move(storage_, other.storage_);
     vt_ = other.vt_;

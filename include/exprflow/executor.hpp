@@ -22,7 +22,8 @@ class Executor {
   Executor(Executor&&) = delete;
   Executor& operator=(Executor&&) = delete;
 
-  auto Submit(std::shared_ptr<const TaskGraph> graph) -> std::future<void>;
+  auto Submit(std::shared_ptr<const TaskGraph> graph)
+      -> std::future<std::vector<std::any>>;
 
  private:
   struct RunState;

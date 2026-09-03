@@ -13,8 +13,8 @@ uint32_t TaskGraph::Size() const {
 
 auto TaskGraph::AddNode(NodeTask task) -> NodeId {
   if (Sealed()) [[unlikely]] {
-    throw std::logic_error(
-        "TaskGraph::AddNode: cannot add node, graph is already sealed");
+    throw std::logic_error(std::format(
+        "TaskGraph::AddNode: cannot add node, graph is already sealed"));
   }
 
   if (Size() >= std::numeric_limits<NodeId>::max()) [[unlikely]] {
@@ -32,8 +32,8 @@ auto TaskGraph::AddNode(NodeTask task) -> NodeId {
 
 void TaskGraph::AddEdge(NodeId from, NodeId to) {
   if (Sealed()) [[unlikely]] {
-    throw std::logic_error(
-        "TaskGraph::AddEdge: cannot add edge, graph is already sealed");
+    throw std::logic_error(std::format(
+        "TaskGraph::AddEdge: cannot add edge, graph is already sealed"));
   }
 
   if (from >= Size()) [[unlikely]] {
@@ -61,7 +61,8 @@ void TaskGraph::AddEdge(NodeId from, NodeId to) {
 
 void TaskGraph::Seal() {
   if (Sealed()) [[unlikely]] {
-    throw std::logic_error("TaskGraph::Seal: graph is already sealed");
+    throw std::logic_error(
+        std::format("TaskGraph::Seal: graph is already sealed"));
   }
 
   const auto n = Size();
@@ -82,7 +83,7 @@ void TaskGraph::Seal() {
     }
   }
   if (order.size() != static_cast<std::size_t>(n)) {
-    throw std::logic_error("TaskGraph::Seal: cycle");
+    throw std::logic_error(std::format("TaskGraph::Seal: cycle"));
   }
 
   flat_offsets_.assign(static_cast<std::size_t>(n) + 1, 0);
@@ -108,13 +109,13 @@ bool TaskGraph::Sealed() const {
 
 auto TaskGraph::Task(NodeId id) const -> const NodeTask& {
   if (!Sealed()) [[unlikely]] {
-    throw std::logic_error("TaskGraph::Task: graph is not sealed");
+    throw std::logic_error(std::format("TaskGraph::Task: graph is not sealed"));
   }
 
   if (id >= Size()) [[unlikely]] {
-    throw std::out_of_range(std::format(
-        "TaskGraph::Task: NodeId ({}) is invalid, total nodes: {}", id,
-        Size()));
+    throw std::out_of_range(
+        std::format("TaskGraph::Task: NodeId ({}) is invalid, total nodes: {}",
+                    id, Size()));
   }
 
   return tasks_[id];
@@ -122,7 +123,8 @@ auto TaskGraph::Task(NodeId id) const -> const NodeTask& {
 
 auto TaskGraph::Successors(NodeId id) const -> std::span<const NodeId> {
   if (!Sealed()) [[unlikely]] {
-    throw std::logic_error("TaskGraph::Successors: graph is not sealed");
+    throw std::logic_error(
+        std::format("TaskGraph::Successors: graph is not sealed"));
   }
 
   if (id >= Size()) [[unlikely]] {
@@ -138,7 +140,8 @@ auto TaskGraph::Successors(NodeId id) const -> std::span<const NodeId> {
 
 auto TaskGraph::Indegrees() const -> std::span<const std::uint32_t> {
   if (!Sealed()) [[unlikely]] {
-    throw std::logic_error("TaskGraph::Indegrees: graph is not sealed");
+    throw std::logic_error(
+        std::format("TaskGraph::Indegrees: graph is not sealed"));
   }
 
   return indegree_;

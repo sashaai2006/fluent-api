@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <exception>
+#include <format>
 #include <stdexcept>
 #include <utility>
 
@@ -33,7 +34,7 @@ struct Executor::RunState {
     if (first_error) {
       done.set_exception(first_error);
     } else {
-      done.set_value();
+      done.set_value(std::move(results));
     }
   }
 
@@ -44,7 +45,7 @@ struct Executor::RunState {
   std::atomic<bool> failed{false};
   std::mutex error_mutex;
   std::exception_ptr first_error;
-  std::promise<void> done;
+  std::promise<std::vector<std::any>> done;
 };
 
 Executor::Executor(std::size_t threads) {
@@ -72,9 +73,13 @@ Executor::~Executor() {
 }
 
 auto Executor::Submit(std::shared_ptr<const TaskGraph> graph)
-    -> std::future<void> {
-  if (!graph || !graph->Sealed()) {
-    throw std::logic_error("Executor::Submit: graph is null or not sealed");
+    -> std::future<std::vector<std::any>> {
+  if (!graph) {
+    throw std::logic_error(std::format("Executor::Submit: graph is null"));
+  }
+  if (!graph->Sealed()) {
+    throw std::logic_error(
+        std::format("Executor::Submit: graph is not sealed"));
   }
 
   auto run = std::make_shared<RunState>(std::move(graph));
@@ -88,7 +93,8 @@ auto Executor::Submit(std::shared_ptr<const TaskGraph> graph)
   {
     std::lock_guard lock(runs_mutex_);
     if (stopping_) {
-      throw std::logic_error("Executor::Submit: executor is stopping");
+      throw std::logic_error(
+          std::format("Executor::Submit: executor is stopping"));
     }
     ++active_runs_;
   }

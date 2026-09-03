@@ -32,6 +32,12 @@ TEST(task_graph, should_throw_when_adding_node_after_seal) {
       std::logic_error);
 }
 
+TEST(task_graph, should_throw_when_save_after_seal) {
+  TaskGraph graph;
+  graph.Seal();
+  EXPECT_THROW(graph.Save(1), std::logic_error);
+}
+
 TEST(task_graph, should_throw_when_adding_edge_after_seal) {
   TaskGraph graph;
   const auto a =
