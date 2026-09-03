@@ -22,15 +22,10 @@ struct Compiled {
   std::vector<TaskGraph::NodeId> outputs;
 };
 
-// Число чанков для параллельных Map/Fold. Берём по числу аппаратных
-// потоков: больше не имеет смысла — узлы всё равно встанут в очередь.
 inline std::size_t DefaultChunkCount() {
   return std::max<std::size_t>(2, std::thread::hardware_concurrency());
 }
 
-// Чтение результата узла. Слот хранит либо само значение T (результаты
-// промежуточных задач), либо reference_wrapper<const T> (листья Value —
-// см. LeafTask: вход не копируется на каждый запуск графа).
 template <typename T>
 auto ReadResult(std::any& slot) -> const T& {
   if (auto* p = std::any_cast<T>(&slot)) {
