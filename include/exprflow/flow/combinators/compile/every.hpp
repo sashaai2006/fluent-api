@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../every.hpp"
-#include "runtime.hpp"
+#include <exprflow/flow/combinators/every.hpp>
+#include <exprflow/flow/combinators/compile/runtime.hpp>
 
 #include <vector>
 

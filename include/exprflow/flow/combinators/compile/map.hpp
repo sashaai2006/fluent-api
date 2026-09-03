@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../map.hpp"
-#include "runtime.hpp"
+#include <exprflow/flow/combinators/map.hpp>
+#include <exprflow/flow/combinators/compile/runtime.hpp>
 
 #include <any>
 #include <cstddef>

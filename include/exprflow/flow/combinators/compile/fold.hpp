@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../fold.hpp"
-#include "runtime.hpp"
+#include <exprflow/flow/combinators/fold.hpp>
+#include <exprflow/flow/combinators/compile/runtime.hpp>
 
 #include <any>
 #include <cstddef>

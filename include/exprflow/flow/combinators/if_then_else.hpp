@@ -1,6 +1,6 @@
 #pragma once
 
-#include "traits.hpp"
+#include <exprflow/flow/combinators/traits.hpp>
 
 #include <type_traits>
 #include <utility>

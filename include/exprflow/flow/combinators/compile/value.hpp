@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../value.hpp"
-#include "runtime.hpp"
+#include <exprflow/flow/combinators/value.hpp>
+#include <exprflow/flow/combinators/compile/runtime.hpp>
 
 #include <vector>
 

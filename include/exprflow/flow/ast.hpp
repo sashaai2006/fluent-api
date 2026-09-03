@@ -1,8 +1,8 @@
 #pragma once
 
-#include "combinators/every.hpp"
-#include "combinators/fold.hpp"
-#include "combinators/if_then_else.hpp"
-#include "combinators/map.hpp"
-#include "combinators/then.hpp"
-#include "combinators/value.hpp"
+#include <exprflow/flow/combinators/every.hpp>
+#include <exprflow/flow/combinators/fold.hpp>
+#include <exprflow/flow/combinators/if_then_else.hpp>
+#include <exprflow/flow/combinators/map.hpp>
+#include <exprflow/flow/combinators/then.hpp>
+#include <exprflow/flow/combinators/value.hpp>

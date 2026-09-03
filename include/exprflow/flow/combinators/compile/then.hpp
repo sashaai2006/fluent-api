@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../then.hpp"
-#include "runtime.hpp"
+#include <exprflow/flow/combinators/then.hpp>
+#include <exprflow/flow/combinators/compile/runtime.hpp>
 
 #include <vector>
 

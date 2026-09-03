@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ast.hpp"
+#include <exprflow/flow/ast.hpp>
 
 #include <type_traits>
 #include <utility>

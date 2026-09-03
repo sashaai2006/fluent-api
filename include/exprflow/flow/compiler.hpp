@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ast.hpp"
-#include "combinators/compile.hpp"
-#include "combinators/compile/runtime.hpp"
-#include "flow.hpp"
+#include <exprflow/flow/ast.hpp>
+#include <exprflow/flow/combinators/compile.hpp>
+#include <exprflow/flow/combinators/compile/runtime.hpp>
+#include <exprflow/flow/flow.hpp>
 
 #include <exprflow/graph/graph.hpp>
 
