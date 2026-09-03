@@ -9,6 +9,8 @@
 #include <numeric>
 #include <vector>
 
+using namespace exprflow;
+
 TEST(eval, should_eval_then_join) {
   EXPECT_EQ(Eval(Value(2, 3).Then([](int a, int b) { return a + b; })), 5);
 }
@@ -81,16 +83,14 @@ TEST(eval, should_fold_in_chunks_with_non_identity_seed) {
 
   Executor executor(4);
   const int folded = Eval(
-      Value(std::move(input)).Fold([](int acc, int x) { return acc + x; },
-                                   100),
+      Value(std::move(input)).Fold([](int acc, int x) { return acc + x; }, 100),
       executor);
   EXPECT_EQ(folded, 100 + kSize);
 }
 
 TEST(eval, should_fold_empty_range_to_seed) {
-  const int folded =
-      Eval(Value(std::vector<int>{}).Fold(
-          [](int acc, int x) { return acc + x; }, 7));
+  const int folded = Eval(Value(std::vector<int>{})
+                              .Fold([](int acc, int x) { return acc + x; }, 7));
   EXPECT_EQ(folded, 7);
 }
 

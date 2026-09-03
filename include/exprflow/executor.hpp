@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+namespace exprflow {
+
 class Executor {
  public:
   explicit Executor(std::size_t threads = std::thread::hardware_concurrency());
@@ -32,7 +34,7 @@ class Executor {
   void Loop();
   void ExecuteNode(const WorkItem& item);
   void OnRunFinished();
-  exprflow::sync::BlockQueue<WorkItem> queue_;
+  sync::BlockQueue<WorkItem> queue_;
   std::vector<std::jthread> workers_;
 
   std::mutex runs_mutex_;
@@ -40,3 +42,9 @@ class Executor {
   std::size_t active_runs_{0};
   bool stopping_{false};
 };
+
+namespace detail {
+auto DefaultExecutor() -> Executor&;
+}
+
+}  // namespace exprflow

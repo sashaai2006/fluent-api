@@ -7,6 +7,8 @@
 ```cpp
 #include <exprflow/eval.hpp>
 
+using namespace exprflow;
+
 auto result = Eval(
     Value(2, 3)
         .Every([](int a, int b) { return a + b; },

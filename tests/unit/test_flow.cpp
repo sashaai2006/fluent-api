@@ -8,6 +8,8 @@
 #include <type_traits>
 #include <vector>
 
+using namespace exprflow;
+
 TEST(flow, should_wrap_value_outputs) {
   auto flow = Value(2, 3);
   static_assert(std::is_same_v<decltype(flow)::Outputs, std::tuple<int, int>>);

@@ -6,6 +6,8 @@
 #include <type_traits>
 #include <utility>
 
+namespace exprflow::detail {
+
 template <typename Signature, std::size_t Capacity = 48>
 class InplaceFunction;
 
@@ -135,3 +137,5 @@ void InplaceFunction<R(Args...), Capacity>::Reset() noexcept {
     vt_ = nullptr;
   }
 }
+
+}  // namespace exprflow::detail

@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <vector>
 
+using namespace exprflow;
+
 constexpr std::size_t kTenNodes = 10;
 
 TEST(task_graph, should_report_not_sealed_when_default_constructed) {

@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <utility>
 
+namespace exprflow {
+
 uint32_t TaskGraph::Size() const {
   return static_cast<uint32_t>(tasks_.size());
 }
@@ -146,3 +148,5 @@ auto TaskGraph::Indegrees() const -> std::span<const std::uint32_t> {
 
   return indegree_;
 }
+
+}  // namespace exprflow

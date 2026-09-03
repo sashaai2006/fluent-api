@@ -7,9 +7,15 @@
 #include <stdexcept>
 #include <utility>
 
+namespace {
+
 struct alignas(64) PaddedCounter {
   std::atomic<std::uint32_t> value{0};
 };
+
+}  // namespace
+
+namespace exprflow {
 
 struct Executor::RunState {
   explicit RunState(std::shared_ptr<const TaskGraph> g)
@@ -147,3 +153,14 @@ void Executor::OnRunFinished() {
     runs_cv_.notify_one();
   }
 }
+
+namespace detail {
+
+auto DefaultExecutor() -> Executor& {
+  static Executor executor;
+  return executor;
+}
+
+}  // namespace detail
+
+}  // namespace exprflow

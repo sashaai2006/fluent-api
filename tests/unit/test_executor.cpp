@@ -11,6 +11,8 @@
 #include <stdexcept>
 #include <thread>
 
+using namespace exprflow;
+
 namespace {
 
 constexpr std::size_t kTwoWorkers = 2;

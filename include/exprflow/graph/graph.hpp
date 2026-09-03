@@ -11,38 +11,16 @@
 #include <utility>
 #include <vector>
 
+namespace exprflow {
+
 class TaskGraph {
  public:
   using NodeId = uint32_t;
-  using NodeTask = InplaceFunction<std::any(std::vector<std::any>&)>;
+  using NodeTask = detail::InplaceFunction<std::any(std::vector<std::any>&)>;
 
  private:
-  /*
-    flat_edges_ — «лента» рёбер (сплющенный vector<vector<NodeId>>).
-    flat_edges_[e] = k  <=>  ребро номер e на ленте ведёт в узел k.
-    Индекс e — номер места на ленте, НЕ номер узла-отправителя.
-    flat_edges_[0] = 1 значит «ребро №0 ведёт в 1», а не «потомки узла 0».
-
-    НО без вспомогательной структуры не понятно, чей это кусок:
-    где кончились исходящие узла 0 и начались исходящие узла 1.
-
-
-    Группа i — все исходящие рёбра ОДНОГО отправителя i (0, 1 или несколько).
-    На ленте группы лежат встык: сначала все из 0, сразу все из 1, …
-
-    flat_offsets_ — линейка начал групп, длина node_count + 1.
-    flat_offsets_[i]     = место на ленте, где начинается группа узла i
-    flat_offsets_[i + 1] = где начинается группа i+1 = конец группы i (не
-    включая)
-
-    Соседи i:
-      flat_edges_[ flat_offsets_[i]  ..  flat_offsets_[i + 1] )
-
-    Последний столбик flat_offsets_[n] — «лента кончилась» (= число рёбер).
-    Пустая группа: flat_offsets_[i] == flat_offsets_[i + 1], кусок нулевой
-    длины.
- */
-
+  // After Seal(): CSR of outgoing edges — successors of i are
+  // flat_edges_[flat_offsets_[i] .. flat_offsets_[i + 1]).
   std::vector<NodeId> flat_edges_;
   std::vector<uint32_t> flat_offsets_;
 
@@ -85,3 +63,5 @@ class TaskGraph {
   auto Successors(NodeId id) const -> std::span<const NodeId>;
   auto Indegrees() const -> std::span<const std::uint32_t>;
 };
+
+}  // namespace exprflow

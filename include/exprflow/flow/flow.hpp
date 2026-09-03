@@ -5,6 +5,8 @@
 #include <type_traits>
 #include <utility>
 
+namespace exprflow {
+
 template <typename Node>
 class Flow {
   Node node_;
@@ -87,3 +89,5 @@ auto Value(Ts&&... xs) {
   using Node = ValueExpr<std::decay_t<Ts>...>;
   return Flow<Node>(Node(std::forward<Ts>(xs)...));
 }
+
+}  // namespace exprflow
