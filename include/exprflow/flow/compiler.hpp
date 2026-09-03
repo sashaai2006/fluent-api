@@ -84,6 +84,9 @@ struct MapTask {
     using Mapped = std::invoke_result_t<const F&, const Elem&>;
     const auto& range = std::any_cast<const Range&>(results[(*ids)[0]]);
     std::vector<Mapped> out;
+    if constexpr (std::ranges::sized_range<Range>) {
+      out.reserve(std::ranges::size(range));
+    }
     for (const auto& elem : range) {
       out.push_back(std::invoke(*fn, elem));
     }
