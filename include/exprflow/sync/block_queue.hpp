@@ -29,6 +29,7 @@ class BlockQueue {
   alignas(64) std::atomic<Node*> head_;
   alignas(64) std::atomic<Node*> tail_;
   alignas(64) std::atomic<std::int64_t> count_{0};
+  std::atomic<std::int64_t> waiters_{0};
   std::atomic<Node*> garbage_{nullptr};
 
  public:
@@ -82,7 +83,9 @@ void BlockQueue<Task>::Push(U&& t) {
   Node* prev_tail = tail_.exchange(node, std::memory_order_acq_rel);
   prev_tail->next.store(node, std::memory_order_release);
   count_.fetch_add(1, std::memory_order_acq_rel);
-  count_.notify_one();
+  if (waiters_.load(std::memory_order_acquire) > 0) {
+    count_.notify_one();
+  }
 }
 
 template <typename Task>
@@ -101,7 +104,12 @@ std::optional<Task> BlockQueue<Task>::Get() {
     if ((observed & kClosedBit) != 0) {
       return std::nullopt;
     }
+    // Отмечаемся как ждущие ДО wait: если Push проскочит между load
+    // счётчика и fetch_add здесь, wait просто не уснёт — значение
+    // уже другое, будильник не теряется.
+    waiters_.fetch_add(1, std::memory_order_release);
     count_.wait(observed, std::memory_order_acquire);
+    waiters_.fetch_sub(1, std::memory_order_release);
   }
 }
 
@@ -139,7 +147,8 @@ bool BlockQueue<Task>::Empty() {
 
 template <typename Task>
 size_t BlockQueue<Task>::Size() {
-  return static_cast<size_t>(count_.load(std::memory_order_acquire) & kCountMask);
+  return static_cast<size_t>(count_.load(std::memory_order_acquire) &
+                             kCountMask);
 }
 
 template <typename Task>

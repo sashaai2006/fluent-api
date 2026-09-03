@@ -6,9 +6,12 @@
 #include <exprflow/graph/graph.hpp>
 
 #include <any>
+#include <cstddef>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <ranges>
+#include <thread>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -19,6 +22,23 @@ struct Compiled {
   std::vector<TaskGraph::NodeId> outputs;
 };
 
+// Число чанков для параллельных Map/Fold. Берём по числу аппаратных
+// потоков: больше не имеет смысла — узлы всё равно встанут в очередь.
+inline std::size_t DefaultChunkCount() {
+  return std::max<std::size_t>(2, std::thread::hardware_concurrency());
+}
+
+// Чтение результата узла. Слот хранит либо само значение T (результаты
+// промежуточных задач), либо reference_wrapper<const T> (листья Value —
+// см. LeafTask: вход не копируется на каждый запуск графа).
+template <typename T>
+auto ReadResult(std::any& slot) -> const T& {
+  if (auto* p = std::any_cast<T>(&slot)) {
+    return *p;
+  }
+  return std::any_cast<std::reference_wrapper<const T>>(slot).get();
+}
+
 template <typename Prev, typename F, std::size_t... I>
 auto InvokeOnPrevImpl(const F& fn,
                       const std::vector<TaskGraph::NodeId>& ids,
@@ -26,8 +46,8 @@ auto InvokeOnPrevImpl(const F& fn,
                       std::index_sequence<I...>)
     -> InvokeResultFromTupleT<F, OutputsT<Prev>> {
   using Tuple = OutputsT<Prev>;
-  return std::invoke(fn, std::any_cast<const std::tuple_element_t<I, Tuple>&>(
-                             results[ids[I]])...);
+  return std::invoke(
+      fn, ReadResult<std::tuple_element_t<I, Tuple>>(results[ids[I]])...);
 }
 
 template <typename Prev, typename F>
@@ -44,7 +64,7 @@ struct LeafTask {
   T* stored;
 
   auto operator()(std::vector<std::any>&) const -> std::any {
-    return std::any{*stored};
+    return std::any{std::cref(*stored)};
   }
 };
 
@@ -82,13 +102,61 @@ struct MapTask {
     using Range = std::tuple_element_t<0, OutputsT<Prev>>;
     using Elem = std::ranges::range_value_t<Range>;
     using Mapped = std::invoke_result_t<const F&, const Elem&>;
-    const auto& range = std::any_cast<const Range&>(results[(*ids)[0]]);
+    const auto& range = ReadResult<Range>(results[(*ids)[0]]);
     std::vector<Mapped> out;
     if constexpr (std::ranges::sized_range<Range>) {
       out.reserve(std::ranges::size(range));
     }
     for (const auto& elem : range) {
       out.push_back(std::invoke(*fn, elem));
+    }
+    return std::any{std::move(out)};
+  }
+};
+
+template <typename Prev, typename F>
+struct MapChunkTask {
+  F* fn;
+  const std::vector<TaskGraph::NodeId>* ids;
+  std::size_t chunk;
+  std::size_t chunks;
+
+  auto operator()(std::vector<std::any>& results) const -> std::any {
+    using Range = std::tuple_element_t<0, OutputsT<Prev>>;
+    using Elem = std::ranges::range_value_t<Range>;
+    using Mapped = std::invoke_result_t<const F&, const Elem&>;
+    const auto& range = ReadResult<Range>(results[(*ids)[0]]);
+    const std::size_t n = std::ranges::size(range);
+    const std::size_t begin = chunk * n / chunks;
+    const std::size_t end = (chunk + 1) * n / chunks;
+    std::vector<Mapped> out;
+    out.reserve(end - begin);
+    auto it = std::ranges::next(std::ranges::begin(range),
+                                static_cast<std::ptrdiff_t>(begin));
+    for (std::size_t i = begin; i < end; ++i, ++it) {
+      out.push_back(std::invoke(*fn, *it));
+    }
+    return std::any{std::move(out)};
+  }
+};
+
+template <typename Prev, typename F>
+struct MapJoinTask {
+  const std::vector<TaskGraph::NodeId>* ids;
+
+  auto operator()(std::vector<std::any>& results) const -> std::any {
+    using Range = std::tuple_element_t<0, OutputsT<Prev>>;
+    using Elem = std::ranges::range_value_t<Range>;
+    using Mapped = std::invoke_result_t<const F&, const Elem&>;
+    std::size_t total = 0;
+    for (const auto id : *ids) {
+      total += std::any_cast<const std::vector<Mapped>&>(results[id]).size();
+    }
+    std::vector<Mapped> out;
+    out.reserve(total);
+    for (const auto id : *ids) {
+      auto& part = std::any_cast<std::vector<Mapped>&>(results[id]);
+      std::move(part.begin(), part.end(), std::back_inserter(out));
     }
     return std::any{std::move(out)};
   }
@@ -103,10 +171,57 @@ struct FoldTask {
   auto operator()(std::vector<std::any>& results) const -> std::any {
     using Range = std::tuple_element_t<0, OutputsT<Prev>>;
     using Acc = std::decay_t<Seed>;
-    const auto& range = std::any_cast<const Range&>(results[(*ids)[0]]);
+    const auto& range = ReadResult<Range>(results[(*ids)[0]]);
     Acc acc = *seed;
     for (const auto& elem : range) {
       acc = std::invoke(*op, acc, elem);
+    }
+    return std::any{std::move(acc)};
+  }
+};
+
+template <typename Prev, typename Op, typename Seed>
+struct FoldChunkTask {
+  Op* op;
+  const std::vector<TaskGraph::NodeId>* ids;
+  std::size_t chunk;
+  std::size_t chunks;
+
+  auto operator()(std::vector<std::any>& results) const -> std::any {
+    using Range = std::tuple_element_t<0, OutputsT<Prev>>;
+    using Acc = std::decay_t<Seed>;
+    const auto& range = ReadResult<Range>(results[(*ids)[0]]);
+    const std::size_t n = std::ranges::size(range);
+    const std::size_t begin = chunk * n / chunks;
+    const std::size_t end = (chunk + 1) * n / chunks;
+    if (begin == end) {
+      return std::any{std::optional<Acc>{}};
+    }
+    auto it = std::ranges::next(std::ranges::begin(range),
+                                static_cast<std::ptrdiff_t>(begin));
+    Acc acc{*it};
+    ++it;
+    for (std::size_t i = begin + 1; i < end; ++i, ++it) {
+      acc = std::invoke(*op, acc, *it);
+    }
+    return std::any{std::optional<Acc>{std::move(acc)}};
+  }
+};
+
+template <typename Prev, typename Op, typename Seed>
+struct FoldJoinTask {
+  Op* op;
+  Seed* seed;
+  const std::vector<TaskGraph::NodeId>* ids;
+
+  auto operator()(std::vector<std::any>& results) const -> std::any {
+    using Acc = std::decay_t<Seed>;
+    Acc acc = *seed;
+    for (const auto id : *ids) {
+      auto& partial = std::any_cast<std::optional<Acc>&>(results[id]);
+      if (partial.has_value()) {
+        acc = std::invoke(*op, acc, *partial);
+      }
     }
     return std::any{std::move(acc)};
   }
@@ -188,7 +303,21 @@ class Compiler {
   template <typename Prev, typename F>
   auto Emit(const MapExpr<Prev, F>& node) -> std::vector<TaskGraph::NodeId> {
     auto* ids = graph_.Save(Emit(node.prev));
-    return {AddWired(ids, MapTask<Prev, F>{graph_.Save(node.mapper), ids})};
+    F* fn = graph_.Save(node.mapper);
+    using Range = std::tuple_element_t<0, OutputsT<Prev>>;
+    if constexpr (std::ranges::sized_range<Range>) {
+      const std::size_t chunks = DefaultChunkCount();
+      std::vector<TaskGraph::NodeId> chunk_ids;
+      chunk_ids.reserve(chunks);
+      for (std::size_t i = 0; i < chunks; ++i) {
+        chunk_ids.push_back(
+            AddWired(ids, MapChunkTask<Prev, F>{fn, ids, i, chunks}));
+      }
+      auto* join_ids = graph_.Save(std::move(chunk_ids));
+      return {AddWired(join_ids, MapJoinTask<Prev, F>{join_ids})};
+    } else {
+      return {AddWired(ids, MapTask<Prev, F>{fn, ids})};
+    }
   }
 
   // FoldExpr
@@ -196,9 +325,26 @@ class Compiler {
   auto Emit(const FoldExpr<Prev, Op, Seed>& node)
       -> std::vector<TaskGraph::NodeId> {
     auto* ids = graph_.Save(Emit(node.prev));
-    return {
-        AddWired(ids, FoldTask<Prev, Op, Seed>{graph_.Save(node.op),
-                                               graph_.Save(node.seed), ids})};
+    Op* op = graph_.Save(node.op);
+    Seed* seed = graph_.Save(node.seed);
+    using Range = std::tuple_element_t<0, OutputsT<Prev>>;
+    using Elem = std::ranges::range_value_t<Range>;
+    using Acc = std::decay_t<Seed>;
+    if constexpr (std::ranges::sized_range<Range> &&
+                  std::constructible_from<Acc, const Elem&>) {
+      const std::size_t chunks = DefaultChunkCount();
+      std::vector<TaskGraph::NodeId> chunk_ids;
+      chunk_ids.reserve(chunks);
+      for (std::size_t i = 0; i < chunks; ++i) {
+        chunk_ids.push_back(
+            AddWired(ids, FoldChunkTask<Prev, Op, Seed>{op, ids, i, chunks}));
+      }
+      auto* join_ids = graph_.Save(std::move(chunk_ids));
+      return {
+          AddWired(join_ids, FoldJoinTask<Prev, Op, Seed>{op, seed, join_ids})};
+    } else {
+      return {AddWired(ids, FoldTask<Prev, Op, Seed>{op, seed, ids})};
+    }
   }
 };
 

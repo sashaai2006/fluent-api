@@ -23,6 +23,11 @@ struct InvokeResultFromTuple<F, std::tuple<Ts...>> {
 template <typename F, typename Tuple>
 using InvokeResultFromTupleT = typename InvokeResultFromTuple<F, Tuple>::type;
 
+template <typename Op, typename Acc, typename Elem>
+concept AssociativeOp =
+    std::is_invocable_r_v<Acc, const Op&, const Acc&, const Elem&> &&
+    std::is_invocable_r_v<Acc, const Op&, const Acc&, const Acc&>;
+
 template <typename... Ts>
 struct ValueExpr {
   std::tuple<Ts...> values;
@@ -153,11 +158,11 @@ struct NodeOutputs<FoldExpr<Prev, Op, Seed>> {
 
   using Elem = std::ranges::range_value_t<Range>;
   using Acc = std::decay_t<Seed>;
-  static_assert(std::is_invocable_r_v<Acc,
-                                      const std::decay_t<Op>&,
-                                      const Acc&,
-                                      const Elem&>,
-                "FoldExpr: op must be Acc(const Acc&, const Elem&)");
+  static_assert(AssociativeOp<std::decay_t<Op>, Acc, Elem>,
+                "FoldExpr: op must be Acc(const Acc&, const Elem&) and "
+                "Acc(const Acc&, const Acc&), and must be associative "
+                "(op(a, op(b, c)) == op(op(a, b), c)) — parallel Fold "
+                "combines partial accumulators of chunks");
 
   using type = std::tuple<Acc>;
 };

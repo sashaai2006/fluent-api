@@ -5,6 +5,7 @@
 #include <exprflow/flow/flow.hpp>
 
 #include <any>
+#include <functional>
 #include <tuple>
 #include <utility>
 
@@ -17,8 +18,12 @@ auto Eval(Flow<Node>&& flow, Executor& executor) -> EvalResultT<Node> {
                 "Eval: expression must have a single output");
   auto compiled = Compile(flow);
   auto results = executor.Submit(compiled.graph).get();
-  return std::any_cast<EvalResultT<Node>>(
-      std::move(results[compiled.outputs[0]]));
+  std::any& slot = results[compiled.outputs[0]];
+  using T = EvalResultT<Node>;
+  if (auto* p = std::any_cast<T>(&slot)) {
+    return std::move(*p);
+  }
+  return std::any_cast<std::reference_wrapper<const T>>(slot).get();
 }
 
 template <typename Node>

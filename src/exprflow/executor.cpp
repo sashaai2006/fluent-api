@@ -7,16 +7,19 @@
 #include <stdexcept>
 #include <utility>
 
+struct alignas(64) PaddedCounter {
+  std::atomic<std::uint32_t> value{0};
+};
+
 struct Executor::RunState {
   explicit RunState(std::shared_ptr<const TaskGraph> g)
       : graph(std::move(g)),
         results(graph->Size()),
-        unresolved(
-            std::make_unique<std::atomic<std::uint32_t>[]>(graph->Size())),
+        unresolved(std::make_unique<PaddedCounter[]>(graph->Size())),
         remaining(graph->Size()) {
     const auto indeg = graph->Indegrees();
     for (std::size_t i = 0; i < indeg.size(); ++i) {
-      unresolved[i].store(indeg[i], std::memory_order_relaxed);
+      unresolved[i].value.store(indeg[i], std::memory_order_relaxed);
     }
   }
 
@@ -40,7 +43,7 @@ struct Executor::RunState {
 
   std::shared_ptr<const TaskGraph> graph;
   std::vector<std::any> results;
-  std::unique_ptr<std::atomic<std::uint32_t>[]> unresolved;
+  std::unique_ptr<PaddedCounter[]> unresolved;
   std::atomic<std::uint32_t> remaining;
   std::atomic<bool> failed{false};
   std::mutex error_mutex;
@@ -126,7 +129,8 @@ void Executor::ExecuteNode(const WorkItem& item) {
   }
 
   for (const auto succ : run->graph->Successors(id)) {
-    if (run->unresolved[succ].fetch_sub(1, std::memory_order_acq_rel) == 1) {
+    if (run->unresolved[succ].value.fetch_sub(1, std::memory_order_acq_rel) ==
+        1) {
       queue_.Push(WorkItem{run, succ});
     }
   }
