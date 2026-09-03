@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Многопоточный Executor для DAG — разбор кода</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --fg: #e6edf3;
+    --dim: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #f78166;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --code-bg: #0a0e14;
+    --border: #30363d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  .slide {
+    display: none;
+    height: 100vh;
+    padding: 5vh 7vw 8vh;
+    flex-direction: column;
+    justify-content: center;
+    overflow-y: auto;
+  }
+  .slide.active { display: flex; }
+  h1 { font-size: 3.2em; line-height: 1.15; margin-bottom: 0.4em; }
+  h2 {
+    font-size: 2em;
+    margin-bottom: 0.7em;
+    color: var(--accent);
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0.25em;
+  }
+  h3 { font-size: 1.2em; margin: 0.8em 0 0.4em; color: var(--accent2); }
+  p, li { font-size: 1.15em; line-height: 1.55; }
+  ul, ol { padding-left: 1.4em; }
+  li { margin-bottom: 0.35em; }
+  .dim { color: var(--dim); }
+  .accent { color: var(--accent); }
+  .orange { color: var(--accent2); }
+  .green { color: var(--green); }
+  .yellow { color: var(--yellow); }
+  .subtitle { font-size: 1.4em; color: var(--dim); }
+  .center { text-align: center; align-items: center; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1em 1.2em;
+    font-size: 0.92em;
+    line-height: 1.45;
+    overflow-x: auto;
+    margin: 0.6em 0;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; }
+  p code, li code {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+    font-size: 0.85em;
+    color: var(--accent2);
+  }
+  .cols { display: flex; gap: 2em; align-items: flex-start; }
+  .cols > div { flex: 1; min-width: 0; }
+  .note {
+    background: var(--bg2);
+    border-left: 4px solid var(--accent);
+    padding: 0.7em 1em;
+    border-radius: 0 8px 8px 0;
+    margin: 0.6em 0;
+  }
+  .warn {
+    background: var(--bg2);
+    border-left: 4px solid var(--yellow);
+    padding: 0.7em 1em;
+    border-radius: 0 8px 8px 0;
+    margin: 0.6em 0;
+  }
+  .ok {
+    background: var(--bg2);
+    border-left: 4px solid var(--green);
+    padding: 0.7em 1em;
+    border-radius: 0 8px 8px 0;
+    margin: 0.6em 0;
+  }
+  /* syntax colors */
+  .kw { color: #ff7b72; }      /* keywords */
+  .ty { color: #79c0ff; }      /* types */
+  .fn { color: #d2a8ff; }      /* functions */
+  .st { color: #a5d6ff; }      /* strings */
+  .cm { color: #8b949e; font-style: italic; } /* comments */
+  .nm { color: #ffa657; }      /* numbers */
+  #footer {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    display: flex;
+    justify-content: space-between;
+    padding: 0.8em 2em;
+    color: var(--dim);
+    font-size: 0.85em;
+    background: linear-gradient(transparent, var(--bg) 40%);
+    pointer-events: none;
+  }
+  #progress {
+    position: fixed;
+    top: 0; left: 0;
+    height: 3px;
+    background: var(--accent);
+    transition: width 0.2s;
+  }
+  .tag {
+    display: inline-block;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 0.15em 0.8em;
+    font-size: 0.75em;
+    color: var(--accent);
+    margin-right: 0.4em;
+  }
+  table { border-collapse: collapse; margin: 0.5em 0; }
+  th, td { border: 1px solid var(--border); padding: 0.4em 0.9em; font-size: 1em; }
+  th { background: var(--bg2); color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<!-- 1. Титул -->
+<section class="slide center">
+  <p class="dim" style="margin-bottom:1em">// разбор кода в стиле CppCon</p>
+  <h1>Многопоточный <span class="accent">Executor</span><br>для графа задач</h1>
+  <p class="subtitle">DAG + пул потоков: очередь, RunState, fail-fast,<br>memory ordering и чистый TSan</p>
+  <p class="dim" style="margin-top:2em">Стрелки ← → или пробел для навигации</p>
+</section>
+
+<!-- 2. План -->
+<section class="slide">
+  <h2>План доклада</h2>
+  <ol>
+    <li>Постановка задачи — что вообще строим</li>
+    <li>Семь дизайн-решений, которые всё определили</li>
+    <li>Архитектура: <code>TaskGraph</code>, <code>Executor</code>, <code>RunState</code>, <code>BlockQueue</code></li>
+    <li>Полный разбор кода — файл за файлом</li>
+    <li>Три сложных места: fail-fast, promise-ровно-один-раз, memory ordering</li>
+    <li>Протокол остановки и деструктор</li>
+    <li>Верификация: тесты и санитайзеры</li>
+  </ol>
+</section>
+
+<!-- 3. Постановка -->
+<section class="slide">
+  <h2>Постановка задачи</h2>
+  <div class="cols">
+    <div>
+      <p>Есть <b>направленный ациклический граф</b> задач. Ребро <code>a → b</code> означает: «b нельзя запускать, пока не завершился a».</p>
+      <p style="margin-top:0.6em">Нужен Executor, который:</p>
+      <ul>
+        <li>исполняет задачи на пуле потоков,</li>
+        <li>соблюдает зависимости,</li>
+        <li>выжимает параллелизм из независимых ветвей,</li>
+        <li>корректно обрабатывает исключения.</li>
+      </ul>
+    </div>
+    <div>
+<pre>
+      ┌───┐
+      │ a │
+      └─┬─┘
+       ╱ ╲
+      ▼   ▼
+    ┌───┐┌───┐
+    │ b ││ c │   b и c — параллельно
+    └─┬─┘└─┬─┘
+       ╲   ╱
+        ▼ ▼
+      ┌───┐
+      │ d │              d ждёт ОБОИХ
+      └───┘
+</pre>
+    </div>
+  </div>
+  <div class="note">«Ромб» — минимальный граф, проверяющий и параллелизм, и join-семантику.</div>
+</section>
+
+<!-- 4. Дизайн-решения -->
+<section class="slide">
+  <h2>Семь решений, которые всё определили</h2>
+  <table>
+    <tr><th>#</th><th>Вопрос</th><th>Решение</th></tr>
+    <tr><td>1</td><td>Кто владеет расписанием?</td><td>Executor; граф — пассивные данные</td></tr>
+    <tr><td>2</td><td>Форма API?</td><td>Async: <code>Submit</code> → <code>future&lt;void&gt;</code></td></tr>
+    <tr><td>3</td><td>Исключения?</td><td>Первый <code>exception_ptr</code>, перевыброс из <code>future::get()</code></td></tr>
+    <tr><td>4</td><td>Падение задачи?</td><td>Fail-fast: отмена pending-узлов прогона</td></tr>
+    <tr><td>5</td><td>Очередь?</td><td>Одна общая под mutex + cv (без work stealing)</td></tr>
+    <tr><td>6</td><td>Несколько графов?</td><td>Да, параллельно в одном пуле</td></tr>
+    <tr><td>7</td><td>Состояние прогона?</td><td><code>RunState</code> на каждый <code>Submit</code></td></tr>
+  </table>
+  <div class="note">Следствие #6 + #7: запечатанный граф иммутабелен — его можно гонять повторно и параллельно с самим собой.</div>
+</section>
+
+<!-- 5. Архитектура -->
+<section class="slide">
+  <h2>Архитектура</h2>
+<pre>
+ ┌──────────────────┐  Submit(graph)   ┌────────────────────────────────┐
+ │  TaskGraph       │ ───────────────▶ │  Executor                      │
+ │  (immutable      │                  │                                │
+ │   после Seal)    │ ◀── read-only ── │  ┌──────────────────────────┐  │
+ │                  │   Task/Successors│  │ BlockQueue&lt;WorkItem&gt;     │  │
+ │  tasks_          │   /Indegrees     │  │ (run, node) (run, node)… │  │
+ │  flat_edges_ CSR │                  │  └───────────▲──────────────┘  │
+ │  indegree_       │                  │              │ Get()           │
+ └──────────────────┘                  │     ┌────────┴─────────┐       │
+                                       │     ▼      ▼          ▼       │
+ ┌──────────────────┐                  │  worker  worker    worker     │
+ │  RunState × N    │ ◀── shared_ptr ─ │   │       │          │        │
+ │  (по одному на   │   из WorkItem    │   └──▶ RunState: counters,    │
+ │   Submit)        │                  │        failed, promise        │
+ └──────────────────┘                  └────────────────────────────────┘
+</pre>
+  <p class="dim">Вся конкурентность сосредоточена в RunState и очереди. Граф читается без единой синхронизации.</p>
+</section>
+
+<!-- 6. Граф: read-интерфейс -->
+<section class="slide">
+  <h2>TaskGraph после slimming'а</h2>
+  <p>Из графа вынесен весь runtime: очередь готовых, статусы узлов, мьютекс, condvar, счётчики. Осталось строительство и валидация:</p>
+<pre><code><span class="kw">auto</span> <span class="fn">AddNode</span>(InlineTask&lt;<span class="kw">void</span>()&gt; task) -&gt; NodeId;
+<span class="kw">void</span> <span class="fn">AddEdge</span>(NodeId from, NodeId to);
+<span class="kw">void</span> <span class="fn">Seal</span>();   <span class="cm">// проверка цикла + сборка CSR-ленты</span>
+
+<span class="cm">// Read-only доступ для планировщика, только после Seal():</span>
+<span class="kw">auto</span> <span class="fn">Task</span>(NodeId id) <span class="kw">const</span> -&gt; <span class="kw">const</span> InlineTask&lt;<span class="kw">void</span>()&gt;&amp;;
+<span class="kw">auto</span> <span class="fn">Successors</span>(NodeId id) <span class="kw">const</span> -&gt; std::span&lt;<span class="kw">const</span> NodeId&gt;;
+<span class="kw">auto</span> <span class="fn">Indegrees</span>() <span class="kw">const</span> -&gt; std::span&lt;<span class="kw">const</span> std::uint32_t&gt;;</code></pre>
+  <div class="warn">Важно: <code>Seal()</code> больше <b>не удаляет</b> <code>indegree_</code> — это неизменяемый снапшот, из которого каждый RunState инициализирует свои счётчики.</div>
+  <div class="note">Побочная правка: <code>InlineTask::operator()</code> стал <code>const</code> (как у <code>std::function</code>) — иначе задачи нельзя вызывать через <code>shared_ptr&lt;const TaskGraph&gt;</code>.</div>
+</section>
+
+<!-- 7. RunState -->
+<section class="slide">
+  <h2>RunState — сердце прогона</h2>
+<pre><code><span class="kw">struct</span> <span class="ty">Executor::RunState</span> {
+  std::shared_ptr&lt;<span class="kw">const</span> TaskGraph&gt; graph;
+  std::unique_ptr&lt;std::atomic&lt;std::uint32_t&gt;[]&gt; unresolved; <span class="cm">// счётчики предков</span>
+  std::atomic&lt;std::uint32_t&gt; remaining;   <span class="cm">// узлов осталось учесть</span>
+  std::atomic&lt;<span class="kw">bool</span>&gt; failed{<span class="kw">false</span>};
+  std::mutex error_mutex;
+  std::exception_ptr first_error;         <span class="cm">// пишется один раз</span>
+  std::promise&lt;<span class="kw">void</span>&gt; done;
+};</code></pre>
+  <ul>
+    <li>Живёт в <code>shared_ptr</code>: каждый элемент очереди держит прогон живым.</li>
+    <li><code>unresolved[i]</code> — сколько предков узла <code>i</code> ещё не завершились. Инициализируется из <code>Indegrees()</code>.</li>
+    <li><code>remaining</code> — сколько узлов ещё не <i>учтено</i> (не обязательно «не выполнено»!). Кто обнулил — тот выполняет promise.</li>
+    <li>Не копируется и не перемещается (atomic + mutex + promise) — и не нужно: всегда за <code>shared_ptr</code>.</li>
+  </ul>
+</section>
+
+<!-- 8. BlockQueue -->
+<section class="slide">
+  <h2>BlockQueue — почему notify вне лока</h2>
+  <div class="cols">
+    <div>
+<pre><code><span class="kw">template</span> &lt;<span class="kw">typename</span> U&gt;
+<span class="kw">void</span> <span class="fn">Push</span>(U&amp;&amp; t) {
+  {
+    std::lock_guard guard(mutex_);
+    <span class="kw">if</span> (!open_) <span class="kw">return</span>;
+    queue_.push(std::forward&lt;U&gt;(t));
+  }
+  cv_.notify_one();   <span class="cm">// снаружи — ок!</span>
+}</code></pre>
+    </div>
+    <div>
+<pre><code>std::optional&lt;Task&gt; <span class="fn">Get</span>() {
+  std::unique_lock lock(mutex_);
+  cv_.wait(lock, [&amp;] {
+    <span class="kw">return</span> !(open_ &amp;&amp; queue_.empty());
+  });
+  <span class="kw">if</span> (queue_.empty())
+    <span class="kw">return</span> std::nullopt;
+  <span class="kw">auto</span> t = std::move(queue_.front());
+  queue_.pop();
+  <span class="kw">return</span> t;
+}</code></pre>
+    </div>
+  </div>
+  <div class="note">Мьютекс защищает <b>предикат</b> (состояние очереди), а не сам notify. Missed wakeup невозможен: либо ждущий увидит непустую очередь при проверке предиката, либо получит notify. Notify вне лока — ещё и оптимизация: проснувшийся поток не упирается в занятый мьютекс.</div>
+  <p><code>Get()</code> после <code>Close()</code> дочитывает остаток очереди → graceful drain бесплатно.</p>
+</section>
+
+<!-- 9. Submit -->
+<section class="slide">
+  <h2>Submit: рождение прогона</h2>
+<pre><code><span class="kw">auto</span> <span class="fn">Submit</span>(std::shared_ptr&lt;<span class="kw">const</span> TaskGraph&gt; graph) -&gt; std::future&lt;<span class="kw">void</span>&gt; {
+  <span class="kw">if</span> (!graph || !graph-&gt;Sealed())
+    <span class="kw">throw</span> std::logic_error{<span class="st">"...not sealed"</span>};
+
+  <span class="kw">auto</span> run = std::make_shared&lt;RunState&gt;(std::move(graph));
+  <span class="kw">auto</span> future = run-&gt;done.get_future();
+
+  <span class="kw">if</span> (run-&gt;graph-&gt;Size() == <span class="nm">0</span>) { run-&gt;Settle(); <span class="kw">return</span> future; }
+
+  {
+    std::lock_guard lock(runs_mutex_);
+    <span class="kw">if</span> (stopping_) <span class="kw">throw</span> std::logic_error{<span class="st">"...stopping"</span>};
+    ++active_runs_;                       <span class="cm">// регистрация ДО посева</span>
+  }
+
+  <span class="kw">for</span> (NodeId id = <span class="nm">0</span>; id &lt; graph-&gt;Size(); ++id)
+    <span class="kw">if</span> (indeg[id] == <span class="nm">0</span>)
+      queue_.Push(WorkItem{run, id});     <span class="cm">// сеем корни</span>
+  <span class="kw">return</span> future;
+}</code></pre>
+  <div class="warn">Порядок критичен: <code>++active_runs_</code> под тем же мьютексом, что и проверка в деструкторе — деструктор не может увидеть «ноль активных прогонов» посреди Submit.</div>
+</section>
+
+<!-- 10. Loop + ExecuteNode -->
+<section class="slide">
+  <h2>Воркер: Loop и ExecuteNode</h2>
+<pre><code><span class="kw">void</span> <span class="fn">Loop</span>() {
+  <span class="kw">while</span> (<span class="kw">auto</span> item = queue_.Get())   <span class="cm">// nullopt ⇔ очередь закрыта и пуста</span>
+    <span class="fn">ExecuteNode</span>(*item);
+}
+
+<span class="kw">void</span> <span class="fn">ExecuteNode</span>(<span class="kw">const</span> WorkItem&amp; item) {
+  <span class="kw">const</span> <span class="kw">auto</span>&amp; [run, id] = item;
+
+  <span class="kw">if</span> (!run-&gt;failed.load(std::memory_order_acquire)) {
+    <span class="kw">try</span> { run-&gt;graph-&gt;Task(id)(); }
+    <span class="kw">catch</span> (...) { run-&gt;Fail(std::current_exception()); }
+  }
+
+  <span class="cm">// обход потомков — ВСЕГДА, даже для пропущенного узла</span>
+  <span class="kw">for</span> (<span class="kw">auto</span> succ : run-&gt;graph-&gt;Successors(id))
+    <span class="kw">if</span> (run-&gt;unresolved[succ].fetch_sub(<span class="nm">1</span>, std::memory_order_acq_rel) == <span class="nm">1</span>)
+      queue_.Push(WorkItem{run, succ});
+
+  <span class="kw">if</span> (run-&gt;remaining.fetch_sub(<span class="nm">1</span>, std::memory_order_acq_rel) == <span class="nm">1</span>) {
+    run-&gt;Settle();          <span class="cm">// promise — ровно один раз</span>
+    <span class="fn">OnRunFinished</span>();
+  }
+}</code></pre>
+</section>
+
+<!-- 11. Fail-fast -->
+<section class="slide">
+  <h2>Сложное место №1: fail-fast без зависаний</h2>
+  <div class="cols">
+    <div>
+<pre>
+  A ✗ (throw)
+  │
+  ▼
+  B ← никогда не выполнится
+  │
+  ▼
+  C ← и он тоже
+
+Вопрос: кто доведёт
+remaining до нуля?
+</pre>
+    </div>
+    <div>
+      <p>Наивный вариант «не класть потомков упавшего в очередь» <b>зависает</b>: счётчик C никогда не обнулится, promise не выполнится, <code>future.get()</code> ждёт вечно.</p>
+      <p style="margin-top:0.5em"><b>Решение — единый учёт:</b></p>
+      <ul>
+        <li>каждый узел ровно один раз попадает в очередь;</li>
+        <li>каждый узел ровно один раз уменьшает <code>remaining</code>;</li>
+        <li>пропущенный узел всё равно делает обход потомков.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note">После падения остаток графа «протекает» через очередь как no-op за O(V+E). Чужие прогоны в той же очереди не затрагиваются — отмена ленивая, по флагу <code>run-&gt;failed</code>.</div>
+</section>
+
+<!-- 12. Promise ровно один раз -->
+<section class="slide">
+  <h2>Сложное место №2: promise выполняется один раз</h2>
+<pre><code><span class="kw">void</span> <span class="fn">Settle</span>() {
+  <span class="kw">if</span> (first_error) done.set_exception(first_error);
+  <span class="kw">else</span>              done.set_value();
+}</code></pre>
+  <ul>
+    <li><code>set_value</code>/<code>set_exception</code> дважды — <code>std::future_error</code>. Значит, нужна единственная точка.</li>
+    <li>Точка одна: <code>remaining.fetch_sub(1) == 1</code> сработает ровно у одного потока за весь прогон — атомик гарантирует.</li>
+    <li>Этот же <code>acq_rel</code>-декремент даёт <b>happens-before</b> со всеми <code>Fail()</code> → <code>first_error</code> читается в <code>Settle()</code> без мьютекса.</li>
+  </ul>
+  <div class="warn">Мьютекс вокруг <code>first_error</code> нужен только для гонки «два Fail одновременно» — первый выигрывает, второй exception_ptr просто уничтожается.</div>
+</section>
+
+<!-- 13. Memory ordering -->
+<section class="slide">
+  <h2>Сложное место №3: memory ordering</h2>
+  <p>Требование: тело задачи-предка <b>happens-before</b> тела задачи-потомка.</p>
+<pre>
+  Поток 1 (предок a)              Поток 2 (последний предок)      Поток 3 (потомок b)
+  ──────────────────              ──────────────────────────      ─────────────────────
+  task_a()  ──sequenced-before──▶
+  unresolved[b].fetch_sub(1,      unresolved[b].fetch_sub(1,      task_b() видит всё,
+     acq_rel) // release             acq_rel) // == 1: acquire       что писали предки
+                                        │
+                                        ▼
+                                  queue_.Push (под mutex) ──▶ Get() (под тем же mutex)
+</pre>
+  <ul>
+    <li>RMW-цепочка <code>fetch_sub(acq_rel)</code>: каждый предок делает release, последний делает acquire и синхронизируется со <b>всеми</b> предыдущими декрементами.</li>
+    <li>Мьютекс очереди дотягивает happens-before до потомка.</li>
+    <li>Инициализация <code>unresolved</code> — <code>relaxed</code>: происходит в Submit до любой публикации.</li>
+  </ul>
+  <div class="ok">Проверено инструментально: TSan молчит на всех 31 тесте.</div>
+</section>
+
+<!-- 14. Деструктор -->
+<section class="slide">
+  <h2>Протокол остановки: graceful drain</h2>
+<pre><code><span class="fn">~Executor</span>() {
+  {
+    std::unique_lock lock(runs_mutex_);
+    stopping_ = <span class="kw">true</span>;                          <span class="cm">// новых Submit нет</span>
+    runs_cv_.wait(lock, [&amp;] { <span class="kw">return</span> active_runs_ == <span class="nm">0</span>; });
+  }
+  <span class="cm">// все прогоны settled ⇒ очередь пуста, воркеры спят в Get()</span>
+  queue_.Close();                              <span class="cm">// будим воркеров</span>
+}  <span class="cm">// jthread'ы join'ятся автоматически</span></code></pre>
+  <ul>
+    <li>Инвариант «Push в закрытую очередь невозможен» держится на протоколе: <code>Close()</code> вызывается только когда <code>active_runs_ == 0</code>.</li>
+    <li><b>Порядок членов в классе важен:</b> <code>queue_</code> объявлена раньше <code>workers_</code> → воркеры join'ятся до разрушения очереди.</li>
+    <li>Пусть promise прогона выполнен до возврата из деструктора — <code>future</code> у пользователя остаётся валидным.</li>
+  </ul>
+</section>
+
+<!-- 15. Гонки, которых нет -->
+<section class="slide">
+  <h2>Гонки, которых нет — и почему</h2>
+  <table>
+    <tr><th>Где могла бы быть</th><th>Почему её нет</th></tr>
+    <tr><td>Чтение графа из воркеров</td><td>Иммутабелен после <code>Seal()</code></td></tr>
+    <tr><td><code>first_error</code> write vs write</td><td><code>error_mutex</code> + first-wins</td></tr>
+    <tr><td><code>first_error</code> write vs read</td><td>hb через <code>remaining</code> acq_rel</td></tr>
+    <tr><td>Submit vs деструктор</td><td><code>stopping_</code> и <code>active_runs_</code> под одним мьютексом</td></tr>
+    <tr><td>Push после Close</td><td>Протокол: Close только при нуле активных прогонов</td></tr>
+    <tr><td>RunState умирает раньше узлов</td><td><code>shared_ptr</code> в каждом WorkItem</td></tr>
+    <tr><td>promise выполнен дважды</td><td>Единственный обнуливший <code>remaining</code></td></tr>
+  </table>
+</section>
+
+<!-- 16. Верификация -->
+<section class="slide">
+  <h2>Верификация</h2>
+  <div class="cols">
+    <div>
+      <h3>Тесты (31 шт.)</h3>
+      <ul>
+        <li>цепочка — порядок на 2 потоках</li>
+        <li>ромб — join ждёт обоих родителей</li>
+        <li>64 независимых узла</li>
+        <li>исключение → <code>future.get()</code></li>
+        <li>потомки упавшего не выполняются</li>
+        <li>один граф дважды / конкурентно с собой</li>
+        <li>два графа параллельно</li>
+        <li>деструктор с in-flight задачей</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Санитайзеры</h3>
+<pre>
+fast (Release)      31/31 ✓
+deep-asan           31/31 ✓
+  ASan + UBSan
+deep-tsan           31/31 ✓
+  ThreadSanitizer
+</pre>
+      <div class="ok">TSan молчит — для многопоточного кода это сильнее любого code review.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 17. Компромиссы -->
+<section class="slide">
+  <h2>Компромиссы и ограничения</h2>
+  <ul>
+    <li><b>Одна очередь = один мьютекс.</b> При тысячах мелких задач — точка contention. Work stealing осознанно отложен: задачи не порождают подзадач.</li>
+    <li><b>Fail-fast через drain.</b> Остаток упавшего графа протекает через очередь как no-op: O(V+E) на отмену, зато единый учёт узлов.</li>
+    <li><b>Нет приоритетов и отмены по запросу</b> — только fail-fast по исключению.</li>
+    <li><b>Задачи — <code>void()</code> без возвращаемых значений.</b> Результаты — через захваченные ссылки, как в тестах.</li>
+    <li><code>hardware_concurrency() == 0</code> сводится к одному потоку.</li>
+  </ul>
+</section>
+
+<!-- 18. Takeaways -->
+<section class="slide center">
+  <h2 style="border:none">Что унести с собой</h2>
+  <p style="font-size:1.35em; max-width: 22em; text-align:left">
+    1. Иммутабельные данные не требуют синхронизации — выносите runtime из структур.<br><br>
+    2. Единый учёт («каждый узел учтён ровно один раз») важнее хитрой отмены.<br><br>
+    3. Promise выполняет тот, кто обнулил счётчик, — и никто больше.<br><br>
+    4. Мьютекс защищает предикат, а не notify.<br><br>
+    5. TSan — часть определения «готово».
+  </p>
+  <p class="dim" style="margin-top:2em">Вопросы?</p>
+</section>
+
+<div id="footer">
+  <span>Executor для DAG — разбор кода</span>
+  <span id="counter">1 / 18</span>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const counter = document.getElementById('counter');
+  const progress = document.getElementById('progress');
+  let current = 0;
+
+  function show(i) {
+    current = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach((s, idx) => s.classList.toggle('active', idx === current));
+    counter.textContent = (current + 1) + ' / ' + slides.length;
+    progress.style.width = ((current + 1) / slides.length * 100) + '%';
+    slides[current].scrollTop = 0;
+    history.replaceState(null, '', '#' + (current + 1));
+  }
+
+  document.addEventListener('keydown', e => {
+    if (['ArrowRight', 'ArrowDown', ' ', 'PageDown'].includes(e.key)) { e.preventDefault(); show(current + 1); }
+    if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) { e.preventDefault(); show(current - 1); }
+    if (e.key === 'Home') show(0);
+    if (e.key === 'End') show(slides.length - 1);
+  });
+  document.addEventListener('click', e => {
+    if (e.clientX > window.innerWidth / 2) show(current + 1); else show(current - 1);
+  });
+  let tx = null;
+  document.addEventListener('touchstart', e => tx = e.touches[0].clientX);
+  document.addEventListener('touchend', e => {
+    if (tx === null) return;
+    const dx = e.changedTouches[0].clientX - tx;
+    if (Math.abs(dx) > 50) show(current + (dx < 0 ? 1 : -1));
+    tx = null;
+  });
+  show(parseInt(location.hash.slice(1), 10) - 1 || 0);
+</script>
+</body>
+</html>
