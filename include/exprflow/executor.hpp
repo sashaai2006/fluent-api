@@ -1,7 +1,7 @@
 #pragma once
 
-#include "block_queue.hpp"
-#include "dag/graph.hpp"
+#include <exprflow/graph/graph.hpp>
+#include <exprflow/sync/block_queue.hpp>
 
 #include <condition_variable>
 #include <cstddef>
@@ -11,8 +11,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-
-namespace dag {
 
 class Executor {
  public:
@@ -33,7 +31,7 @@ class Executor {
   void Loop();
   void ExecuteNode(const WorkItem& item);
   void OnRunFinished();
-  BlockQueue<WorkItem> queue_;
+  exprflow::sync::BlockQueue<WorkItem> queue_;
   std::vector<std::jthread> workers_;
 
   std::mutex runs_mutex_;
@@ -41,5 +39,3 @@ class Executor {
   std::size_t active_runs_{0};
   bool stopping_{false};
 };
-
-}  // namespace dag

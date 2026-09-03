@@ -1,4 +1,4 @@
-#include "executor/executor.hpp"
+#include <exprflow/executor.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -6,11 +6,10 @@
 #include <stdexcept>
 #include <utility>
 
-namespace dag {
-
 struct Executor::RunState {
   explicit RunState(std::shared_ptr<const TaskGraph> g)
       : graph(std::move(g)),
+        results(graph->Size()),
         unresolved(
             std::make_unique<std::atomic<std::uint32_t>[]>(graph->Size())),
         remaining(graph->Size()) {
@@ -39,6 +38,7 @@ struct Executor::RunState {
   }
 
   std::shared_ptr<const TaskGraph> graph;
+  std::vector<std::any> results;
   std::unique_ptr<std::atomic<std::uint32_t>[]> unresolved;
   std::atomic<std::uint32_t> remaining;
   std::atomic<bool> failed{false};
@@ -113,7 +113,7 @@ void Executor::ExecuteNode(const WorkItem& item) {
 
   if (!run->failed.load(std::memory_order_acquire)) {
     try {
-      run->graph->Task(id)();
+      run->results[id] = run->graph->Task(id)(run->results);
     } catch (...) {
       run->Fail(std::current_exception());
     }
@@ -137,5 +137,3 @@ void Executor::OnRunFinished() {
     runs_cv_.notify_one();
   }
 }
-
-}  // namespace dag

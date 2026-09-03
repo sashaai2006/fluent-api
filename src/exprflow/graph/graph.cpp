@@ -1,4 +1,4 @@
-#include <dag/graph.hpp>
+#include <exprflow/graph/graph.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -7,13 +7,11 @@
 #include <stdexcept>
 #include <utility>
 
-namespace dag {
-
 uint32_t TaskGraph::Size() const {
   return static_cast<uint32_t>(tasks_.size());
 }
 
-auto TaskGraph::AddNode(InlineTask<void()> task) -> NodeId {
+auto TaskGraph::AddNode(NodeTask task) -> NodeId {
   if (Sealed()) [[unlikely]] {
     throw std::logic_error(
         "TaskGraph::AddNode: cannot add node, graph is already sealed");
@@ -108,7 +106,7 @@ bool TaskGraph::Sealed() const {
   return sealed_;
 }
 
-auto TaskGraph::Task(NodeId id) const -> const InlineTask<void()>& {
+auto TaskGraph::Task(NodeId id) const -> const NodeTask& {
   if (!Sealed()) [[unlikely]] {
     throw std::logic_error("TaskGraph::Task: graph is not sealed");
   }
@@ -145,5 +143,3 @@ auto TaskGraph::Indegrees() const -> std::span<const std::uint32_t> {
 
   return indegree_;
 }
-
-}  // namespace dag

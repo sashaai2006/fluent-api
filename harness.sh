@@ -13,7 +13,7 @@ configure_build_test() {
   local dir="$1"
   shift
   cmake -S "$root" -B "$dir" "$@"
-  cmake --build "$dir" --target dag_unit --parallel "$jobs"
+  cmake --build "$dir" --parallel "$jobs"
   ctest --test-dir "$dir" --output-on-failure
 }
 

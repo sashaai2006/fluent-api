@@ -6,13 +6,11 @@
 #include <type_traits>
 #include <utility>
 
-namespace dag {
-
 template <typename Signature, std::size_t Capacity = 48>
-class InlineTask;
+class InplaceFunction;
 
 template <typename R, typename... Args, std::size_t Capacity>
-class InlineTask<R(Args...), Capacity> {
+class InplaceFunction<R(Args...), Capacity> {
  private:
   static constexpr std::size_t kAlignment = alignof(std::max_align_t);
 
@@ -26,45 +24,45 @@ class InlineTask<R(Args...), Capacity> {
   const Vtable* vt_{nullptr};
 
  public:
-  InlineTask() noexcept = default;
+  InplaceFunction() noexcept = default;
 
-  ~InlineTask();
+  ~InplaceFunction();
 
-  InlineTask(InlineTask&& other) noexcept;
+  InplaceFunction(InplaceFunction&& other) noexcept;
 
-  InlineTask(const InlineTask&) = delete;
-  InlineTask& operator=(const InlineTask&) = delete;
-  InlineTask& operator=(InlineTask&& other) noexcept;
+  InplaceFunction(const InplaceFunction&) = delete;
+  InplaceFunction& operator=(const InplaceFunction&) = delete;
+  InplaceFunction& operator=(InplaceFunction&& other) noexcept;
 
   template <typename Fn>
-  InlineTask(Fn&& fn)
+  InplaceFunction(Fn&& fn)
     requires(!std::same_as<std::remove_cvref_t<Fn>,
-                           InlineTask<R(Args...), Capacity>>);
+                           InplaceFunction<R(Args...), Capacity>>);
 
   explicit operator bool() const noexcept;
 
   R operator()(Args... args) const;
 
  private:
-  void MoveFrom(InlineTask& other) noexcept;
+  void MoveFrom(InplaceFunction& other) noexcept;
   void Reset() noexcept;
 };
 
 template <typename R, typename... Args, std::size_t Capacity>
-InlineTask<R(Args...), Capacity>::~InlineTask() {
+InplaceFunction<R(Args...), Capacity>::~InplaceFunction() {
   Reset();
 }
 
 template <typename R, typename... Args, std::size_t Capacity>
-InlineTask<R(Args...), Capacity>::InlineTask(InlineTask&& other) noexcept {
+InplaceFunction<R(Args...), Capacity>::InplaceFunction(InplaceFunction&& other) noexcept {
   MoveFrom(other);
 }
 
 template <typename R, typename... Args, std::size_t Capacity>
 template <typename Fn>
-InlineTask<R(Args...), Capacity>::InlineTask(Fn&& fn)
+InplaceFunction<R(Args...), Capacity>::InplaceFunction(Fn&& fn)
   requires(
-      !std::same_as<std::remove_cvref_t<Fn>, InlineTask<R(Args...), Capacity>>)
+      !std::same_as<std::remove_cvref_t<Fn>, InplaceFunction<R(Args...), Capacity>>)
 {
   using clean_fn = std::remove_cvref_t<Fn>;
   static_assert(std::is_move_constructible_v<clean_fn>,
@@ -96,12 +94,12 @@ InlineTask<R(Args...), Capacity>::InlineTask(Fn&& fn)
 }
 
 template <typename R, typename... Args, std::size_t Capacity>
-InlineTask<R(Args...), Capacity>::operator bool() const noexcept {
+InplaceFunction<R(Args...), Capacity>::operator bool() const noexcept {
   return vt_ != nullptr;
 }
 
 template <typename R, typename... Args, std::size_t Capacity>
-R InlineTask<R(Args...), Capacity>::operator()(Args... args) const {
+R InplaceFunction<R(Args...), Capacity>::operator()(Args... args) const {
   if (!vt_) {
     throw std::bad_function_call{};
   }
@@ -109,8 +107,8 @@ R InlineTask<R(Args...), Capacity>::operator()(Args... args) const {
 }
 
 template <typename R, typename... Args, std::size_t Capacity>
-InlineTask<R(Args...), Capacity>& InlineTask<R(Args...), Capacity>::operator=(
-    InlineTask&& other) noexcept {
+InplaceFunction<R(Args...), Capacity>& InplaceFunction<R(Args...), Capacity>::operator=(
+    InplaceFunction&& other) noexcept {
   if (this != &other) {
     Reset();
     MoveFrom(other);
@@ -119,7 +117,7 @@ InlineTask<R(Args...), Capacity>& InlineTask<R(Args...), Capacity>::operator=(
 }
 
 template <typename R, typename... Args, std::size_t Capacity>
-void InlineTask<R(Args...), Capacity>::MoveFrom(InlineTask& other) noexcept {
+void InplaceFunction<R(Args...), Capacity>::MoveFrom(InplaceFunction& other) noexcept {
   if (other.vt_) {
     other.vt_->Move(storage_, other.storage_);
     vt_ = other.vt_;
@@ -128,11 +126,9 @@ void InlineTask<R(Args...), Capacity>::MoveFrom(InlineTask& other) noexcept {
 }
 
 template <typename R, typename... Args, std::size_t Capacity>
-void InlineTask<R(Args...), Capacity>::Reset() noexcept {
+void InplaceFunction<R(Args...), Capacity>::Reset() noexcept {
   if (vt_) {
     vt_->Destroy(storage_);
     vt_ = nullptr;
   }
 }
-
-}  // namespace dag

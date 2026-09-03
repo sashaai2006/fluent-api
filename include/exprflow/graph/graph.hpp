@@ -1,16 +1,19 @@
 #pragma once
 
-#include "inline_task.hpp"
+#include <exprflow/graph/inplace_function.hpp>
 
+#include <any>
 #include <cstdint>
+#include <functional>
 #include <span>
+#include <type_traits>
+#include <utility>
 #include <vector>
-
-namespace dag {
 
 class TaskGraph {
  public:
   using NodeId = uint32_t;
+  using NodeTask = InplaceFunction<std::any(std::vector<std::any>&)>;
 
  private:
   /*
@@ -42,7 +45,7 @@ class TaskGraph {
   std::vector<NodeId> flat_edges_;
   std::vector<uint32_t> flat_offsets_;
 
-  std::vector<InlineTask<void()>> tasks_;
+  std::vector<NodeTask> tasks_;
 
   std::vector<std::vector<NodeId>> out_adj_;
   std::vector<std::uint32_t> indegree_;
@@ -57,16 +60,14 @@ class TaskGraph {
   TaskGraph& operator=(const TaskGraph&) = delete;
   TaskGraph(TaskGraph&&) = delete;
   TaskGraph& operator=(TaskGraph&&) = delete;
+  auto AddNode(NodeTask task) -> NodeId;
 
-  auto AddNode(InlineTask<void()> task) -> NodeId;
   void AddEdge(NodeId from, NodeId to);
   void Seal();
   bool Sealed() const;
   uint32_t Size() const;
 
-  auto Task(NodeId id) const -> const InlineTask<void()>&;
+  auto Task(NodeId id) const -> const NodeTask&;
   auto Successors(NodeId id) const -> std::span<const NodeId>;
   auto Indegrees() const -> std::span<const std::uint32_t>;
 };
-
-}  // namespace dag

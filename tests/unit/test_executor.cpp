@@ -1,16 +1,14 @@
-#include <executor/executor.hpp>
-
-#include <dag/graph.hpp>
+#include <exprflow/executor.hpp>
+#include <exprflow/graph/graph.hpp>
 
 #include <gtest/gtest.h>
 
+#include <any>
 #include <atomic>
 #include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <thread>
-
-using namespace dag;
 
 namespace {
 
@@ -33,7 +31,7 @@ TEST(executor, should_throw_on_null_graph) {
 TEST(executor, should_throw_on_unsealed_graph) {
   Executor executor(kTwoWorkers);
   auto graph = MakeSealedGraph();
-  graph->AddNode([] {});
+  graph->AddNode([](std::vector<std::any>&) -> std::any { return {}; });
   EXPECT_THROW((void)executor.Submit(graph), std::logic_error);
 }
 
@@ -52,11 +50,12 @@ TEST(executor, should_run_chain_in_order) {
 
   TaskGraph::NodeId prev = 0;
   for (int i = 0; i < kChainLength; ++i) {
-    const auto id = graph->AddNode([&, i] {
+    const auto id = graph->AddNode([&, i](std::vector<std::any>&) -> std::any {
       if (next.load() != i) {
         order_ok.store(false);
       }
       next.store(i + 1);
+      return {};
     });
     if (i > 0) {
       graph->AddEdge(prev, id);
@@ -78,23 +77,30 @@ TEST(executor, should_run_diamond_with_join_after_both_parents) {
   std::atomic<int> c_done{0};
   std::atomic<int> join_parents{0};
 
-  const auto a = graph->AddNode([&] { a_done.store(1); });
-  const auto b = graph->AddNode([&] {
+  const auto a = graph->AddNode([&](std::vector<std::any>&) -> std::any {
+    a_done.store(1);
+    return {};
+  });
+  const auto b = graph->AddNode([&](std::vector<std::any>&) -> std::any {
     if (a_done.load() != 1) {
       b_done.store(-1);
-      return;
+      return {};
     }
     b_done.store(1);
+    return {};
   });
-  const auto c = graph->AddNode([&] {
+  const auto c = graph->AddNode([&](std::vector<std::any>&) -> std::any {
     if (a_done.load() != 1) {
       c_done.store(-1);
-      return;
+      return {};
     }
     c_done.store(1);
+    return {};
   });
-  const auto d = graph->AddNode(
-      [&] { join_parents.store(b_done.load() + c_done.load()); });
+  const auto d = graph->AddNode([&](std::vector<std::any>&) -> std::any {
+    join_parents.store(b_done.load() + c_done.load());
+    return {};
+  });
   graph->AddEdge(a, b);
   graph->AddEdge(a, c);
   graph->AddEdge(b, d);
@@ -113,7 +119,10 @@ TEST(executor, should_run_independent_nodes) {
   auto graph = MakeSealedGraph();
   std::atomic<int> counter{0};
   for (int i = 0; i < kIndependentNodes; ++i) {
-    graph->AddNode([&] { counter.fetch_add(1); });
+    graph->AddNode([&](std::vector<std::any>&) -> std::any {
+      counter.fetch_add(1);
+      return {};
+    });
   }
   graph->Seal();
   executor.Submit(graph).get();
@@ -123,7 +132,9 @@ TEST(executor, should_run_independent_nodes) {
 TEST(executor, should_rethrow_task_exception_from_future) {
   Executor executor(kTwoWorkers);
   auto graph = MakeSealedGraph();
-  graph->AddNode([] { throw std::runtime_error{"boom"}; });
+  graph->AddNode([](std::vector<std::any>&) -> std::any {
+    throw std::runtime_error{"boom"};
+  });
   graph->Seal();
 
   auto future = executor.Submit(graph);
@@ -140,9 +151,13 @@ TEST(executor, should_skip_dependents_after_failure) {
   auto graph = MakeSealedGraph();
   std::atomic<bool> dependent_ran{false};
 
-  const auto a =
-      graph->AddNode([] { throw std::runtime_error{"boom"}; });
-  const auto b = graph->AddNode([&] { dependent_ran.store(true); });
+  const auto a = graph->AddNode([](std::vector<std::any>&) -> std::any {
+    throw std::runtime_error{"boom"};
+  });
+  const auto b = graph->AddNode([&](std::vector<std::any>&) -> std::any {
+    dependent_ran.store(true);
+    return {};
+  });
   graph->AddEdge(a, b);
   graph->Seal();
 
@@ -155,14 +170,20 @@ TEST(executor, should_run_same_graph_twice) {
   Executor executor(kTwoWorkers);
   auto graph = MakeSealedGraph();
   std::atomic<int> counter{0};
-  const auto a = graph->AddNode([&] { counter.fetch_add(1); });
-  const auto b = graph->AddNode([&] { counter.fetch_add(1); });
+  const auto a = graph->AddNode([&](std::vector<std::any>&) -> std::any {
+    counter.fetch_add(1);
+    return {};
+  });
+  const auto b = graph->AddNode([&](std::vector<std::any>&) -> std::any {
+    counter.fetch_add(1);
+    return {};
+  });
   graph->AddEdge(a, b);
   graph->Seal();
 
   executor.Submit(graph).get();
   executor.Submit(graph).get();
-  EXPECT_EQ(counter.load(), 2 * 2);  // 2 узла × 2 прогона
+  EXPECT_EQ(counter.load(), 2 * 2);
 }
 
 TEST(executor, should_run_graphs_concurrently) {
@@ -173,7 +194,10 @@ TEST(executor, should_run_graphs_concurrently) {
     auto graph = MakeSealedGraph();
     TaskGraph::NodeId prev = 0;
     for (int i = 0; i < kChainLength; ++i) {
-      const auto id = graph->AddNode([&] { counter.fetch_add(1); });
+      const auto id = graph->AddNode([&](std::vector<std::any>&) -> std::any {
+        counter.fetch_add(1);
+        return {};
+      });
       if (i > 0) {
         graph->AddEdge(prev, id);
       }
@@ -195,7 +219,10 @@ TEST(executor, should_run_same_graph_concurrently_with_itself) {
   auto graph = MakeSealedGraph();
   std::atomic<int> counter{0};
   for (int i = 0; i < kIndependentNodes; ++i) {
-    graph->AddNode([&] { counter.fetch_add(1); });
+    graph->AddNode([&](std::vector<std::any>&) -> std::any {
+      counter.fetch_add(1);
+      return {};
+    });
   }
   graph->Seal();
 
@@ -212,9 +239,10 @@ TEST(executor, should_finish_inflight_run_before_destruction) {
   {
     Executor executor(kTwoWorkers);
     auto graph = MakeSealedGraph();
-    graph->AddNode([&] {
+    graph->AddNode([&](std::vector<std::any>&) -> std::any {
       std::this_thread::sleep_for(std::chrono::milliseconds{50});
       done.store(true);
+      return {};
     });
     graph->Seal();
     future = executor.Submit(graph);

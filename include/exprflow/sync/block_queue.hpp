@@ -5,6 +5,8 @@
 #include <optional>
 #include <queue>
 
+namespace exprflow::sync {
+
 template <typename Task>
 class BlockQueue {
  private:
@@ -27,6 +29,7 @@ class BlockQueue {
   size_t Size();
   void Close();
 };
+
 template <typename Task>
 BlockQueue<Task>::~BlockQueue() {
   Close();
@@ -75,3 +78,5 @@ void BlockQueue<Task>::Close() {
   open_ = false;
   cv_.notify_all();
 }
+
+}  // namespace exprflow::sync
