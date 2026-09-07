@@ -49,6 +49,18 @@ TEST(compiler, should_run_then_join) {
   EXPECT_EQ(ResultAt<int>(results, compiled), 5);
 }
 
+TEST(compiler, should_fuse_then_chain) {
+  auto flow = Value(2, 3)
+                  .Then([](int a, int b) { return a + b; })
+                  .Then([](int sum) { return sum * sum; });
+  auto compiled = Compile(flow);
+  ASSERT_EQ(compiled.Graph().Size(), 3u);
+  ASSERT_EQ(compiled.Outputs().size(), 1u);
+
+  const auto results = RunCompiled(compiled);
+  EXPECT_EQ(ResultAt<int>(results, compiled), 25);
+}
+
 TEST(compiler, should_run_every_then_join) {
   auto flow =
       Value(2, 3)
