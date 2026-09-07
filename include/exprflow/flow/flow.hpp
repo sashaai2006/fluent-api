@@ -51,7 +51,15 @@ auto Flow<Node>::From(NextNode node) -> Flow<NextNode> {
 template <typename Node>
 template <typename F>
 auto Flow<Node>::Then(F&& f) && {
-  return From(ThenExpr(std::move(node_), std::forward<F>(f)));
+  if constexpr (is_then_expr_v<Node>) {
+    auto super_position = [g = std::move(node_.fn),
+                           f = std::forward<F>(f)](auto&&... args) {
+      return f(g(std::forward<decltype(args)>(args)...));
+    };
+    return From(ThenExpr(std::move(node_.prev), std::move(super_position)));
+  } else {
+    return From(ThenExpr(std::move(node_), std::forward<F>(f)));
+  }
 }
 
 template <typename Node>

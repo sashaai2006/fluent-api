@@ -15,6 +15,13 @@ TEST(eval, should_eval_then_join) {
   EXPECT_EQ(Eval(Value(2, 3).Then([](int a, int b) { return a + b; })), 5);
 }
 
+TEST(eval, should_eval_fused_then_chain) {
+  EXPECT_EQ(Eval(Value(2, 3)
+                     .Then([](int a, int b) { return a + b; })
+                     .Then([](int sum) { return sum * sum; })),
+            25);
+}
+
 TEST(eval, should_eval_every_then_join) {
   EXPECT_DOUBLE_EQ(
       Eval(Value(2, 3)

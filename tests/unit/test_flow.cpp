@@ -20,6 +20,13 @@ TEST(flow, should_then_join_value_outputs) {
   static_assert(std::is_same_v<decltype(flow)::Outputs, std::tuple<int>>);
 }
 
+TEST(flow, should_fuse_two_thens) {
+  auto flow = Value(2, 3)
+                  .Then([](int a, int b) { return a + b; })
+                  .Then([](int sum) { return sum * sum; });
+  static_assert(std::is_same_v<decltype(flow)::Outputs, std::tuple<int>>);
+}
+
 TEST(flow, should_every_keep_branch_outputs) {
   auto flow =
       Value(2, 3).Every([](int a, int b) { return std::pow((a + b) / 2.0, 2); },
